@@ -48,17 +48,17 @@ Interceptor.attach(writeFile, {
         */
         var len = args[2].toInt32(); // get nNumberOfBytesToWrite
         if (args[0] in pipeHandlers) {
-            console.log("\nThread: " + Process.getCurrentThreadId())
+            console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
             console.log("> Writing to Pipe: " + pipeHandlers[args[0]]);
-            console.log("> Content:\n" + hexdump(args[1], { length: len })) + "\n";
+            console.log("> Content (" + len + " bytes):\n" + hexdump(args[1], { length: len })) + "\n";
         } else if (args[0] in otherHandlers) {
         } else {
             var type = getFileType(args[0]);
             if (type == 3) {
                 pipeHandlers[args[0]] = getPipeName(args[0]);
-                console.log("\nThread: " + Process.getCurrentThreadId())
+                console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
                 console.log("> Writing to Pipe: " + pipeHandlers[args[0]]);
-                console.log("> Content:\n" + hexdump(args[1], { length: len })) + "\n";
+                console.log("> Content (" + len + ") bytes:\n" + hexdump(args[1], { length: len })) + "\n";
             } else {
                 otherHandlers[args[0]] = '';
             }
@@ -79,7 +79,7 @@ Interceptor.attach(readFile, {
         */
         outLenght = args[3];
         if (args[0] in pipeHandlers) {
-            console.log("\nThread: " + Process.getCurrentThreadId())
+            console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
             console.log("< Reading from Pipe: " + pipeHandlers[args[0]]);
             readbuff = args[1];
         } else if (args[0] in otherHandlers) {
@@ -87,7 +87,7 @@ Interceptor.attach(readFile, {
             var type = getFileType(args[0]);
             if (type == 3) {
                 pipeHandlers[args[0]] = getPipeName(args[0]);
-                console.log("\nThread: " + Process.getCurrentThreadId())
+                console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
                 console.log("< Reading from Pipe: " + pipeHandlers[args[0]]);
                 readbuff = args[1];
             } else {
@@ -99,7 +99,11 @@ Interceptor.attach(readFile, {
     onLeave: function (retval) {
         if (!(readbuff == 0x0)) {
             var len = outLenght.readInt();
-            console.log("< Content:\n" + hexdump(readbuff, { length: len }) + "\n");
+            console.log("< Content (" + len + " bytes):");
+            if (len > 0) {
+                console.log(hexdump(readbuff, { length: len }));
+            }
+            console.log();
             readbuff = 0x0;
         }
     }
