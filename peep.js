@@ -278,7 +278,7 @@ Interceptor.attach(createNamedPipeW, {
         } else {
             console.log("Pipe accepts remote clients");
         }
-        this.pipename = args0Str;
+        this.pipename = pipename;
     },
     onLeave: function (retval) {
         //console.log("\nHandler: "+retval);
