@@ -17,13 +17,8 @@ var GetFileInformationByHandleEx = new NativeFunction(GetFileInformationByHandle
 var getFileTypeAddr = Module.getGlobalExportByName('GetFileType');
 var getFileType = new NativeFunction(getFileTypeAddr, 'uint32', ['pointer']);
 
-var isPipe = 0;
-var pipename;
 var pipeHandlers = {};
 var otherHandlers = {};
-var filename;
-var readbuff = 0x0;
-var outLenght;
 
 function getPipeName(handle) {
     var buf = Memory.alloc(600);
@@ -33,6 +28,10 @@ function getPipeName(handle) {
         return fileName;
     }
     return handle;
+}
+
+function dateTimeStr() {
+    return new Date().toISOString();
 }
 
 Interceptor.attach(writeFile, {
@@ -48,7 +47,7 @@ Interceptor.attach(writeFile, {
         */
         var len = args[2].toInt32(); // get nNumberOfBytesToWrite
         if (args[0] in pipeHandlers) {
-            console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
+            console.log("\n" + dateTimeStr() + " Thread: " + Process.getCurrentThreadId())
             console.log("> Writing to Pipe: " + pipeHandlers[args[0]]);
             console.log("> Content (" + len + " bytes):\n" + hexdump(args[1], { length: len })) + "\n";
         } else if (args[0] in otherHandlers) {
@@ -56,7 +55,7 @@ Interceptor.attach(writeFile, {
             var type = getFileType(args[0]);
             if (type == 3) {
                 pipeHandlers[args[0]] = getPipeName(args[0]);
-                console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
+                console.log("\n" + dateTimeStr() + " Thread: " + Process.getCurrentThreadId())
                 console.log("> Writing to Pipe: " + pipeHandlers[args[0]]);
                 console.log("> Content (" + len + ") bytes:\n" + hexdump(args[1], { length: len })) + "\n";
             } else {
@@ -77,34 +76,35 @@ Interceptor.attach(readFile, {
         [in, out, optional] LPOVERLAPPED lpOverlapped
         );
         */
-        outLenght = args[3];
+        this.outLength = args[3];
+        var enableOnLeave = false;
         if (args[0] in pipeHandlers) {
-            console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
+            console.log("\n" + dateTimeStr() + " Thread: " + Process.getCurrentThreadId())
             console.log("< Reading from Pipe: " + pipeHandlers[args[0]]);
-            readbuff = args[1];
+            this.readbuff = args[1];
+            this.enableOnLeave = true;
         } else if (args[0] in otherHandlers) {
         } else {
             var type = getFileType(args[0]);
             if (type == 3) {
                 pipeHandlers[args[0]] = getPipeName(args[0]);
-                console.log("\n" + new Date() + " Thread: " + Process.getCurrentThreadId())
+                console.log("\n" + dateTimeStr() + " Thread: " + Process.getCurrentThreadId())
                 console.log("< Reading from Pipe: " + pipeHandlers[args[0]]);
-                readbuff = args[1];
+                this.readbuff = args[1];
+                this.enableOnLeave = true;
             } else {
                 otherHandlers[args[0]] = '';
             }
-
         }
     },
     onLeave: function (retval) {
-        if (!(readbuff == 0x0)) {
-            var len = outLenght.readInt();
+        if (retval != 0 && this.enableOnLeave && !this.readbuff.isNull()) {
+            var len = this.outLength.readU32();
             console.log("< Content (" + len + " bytes):");
             if (len > 0) {
-                console.log(hexdump(readbuff, { length: len }));
+                console.log(hexdump(this.readbuff, { length: len }));
             }
             console.log();
-            readbuff = 0x0;
         }
     }
 });
@@ -122,22 +122,21 @@ Interceptor.attach(createFileA, {
         [in, optional] HANDLE                hTemplateFile
         );
         */
-        var args0Str = args[0].readCString();
-        if (args0Str.includes("\\\\.\\pipe")) {
-            isPipe = 1;
-            pipename = args0Str;
+        var pipename = args[0].readCString();
+        if (pipename.includes("\\\\.\\pipe")) {
+            this.isPipe = true;
+            this.pipename = pipename;
         } else {
-            isPipe = 0;
+            this.isPipe = false;
         }
     },
     onLeave: function (retval) {
-        if (isPipe == 1) {
+        if (this.isPipe) {
             //console.log("\nHandler: "+retval);
             if (!(retval in pipeHandlers)) {
                 //console.log(retval)
-                pipeHandlers[retval] = pipename;
+                pipeHandlers[retval] = this.pipename;
             }
-            isPipe = 0;
         } else {
             if (!(retval in otherHandlers)) {
                 otherHandlers[retval] = '';
@@ -159,23 +158,22 @@ Interceptor.attach(createFileW, {
         [in, optional] HANDLE                hTemplateFile
         );
         */
-        var args0Str = args[0].readUtf16String();
-        if (args0Str.includes("\\\\.\\pipe")) {
-            isPipe = 1;
-            pipename = args0Str;
+        var filename = args[0].readUtf16String();
+        if (filename.includes("\\\\.\\pipe")) {
+            this.isPipe = true;
+            this.pipename = filename;
         } else {
-            isPipe = 0;
+            this.isPipe = false;
         }
 
     },
     onLeave: function (retval) {
-        if (isPipe == 1) {
+        if (this.isPipe) {
             //console.log("\nHandler: "+retval);
             if (!(retval in pipeHandlers)) {
                 //console.log(retval)
-                pipeHandlers[retval] = pipename;
+                pipeHandlers[retval] = this.pipename;
             }
-            isPipe = 0;
         } else {
             if (!(retval in otherHandlers)) {
                 otherHandlers[retval] = '';
@@ -199,18 +197,19 @@ Interceptor.attach(createNamedPipeA, {
         );
         Returns file handler
         */
-        var args0Str = args[0].readCString();
-        console.log("\nPipename: " + args0Str);
+        var pipename = args[0].readCString();
+        console.log("\nPipename: " + pipename);
 
-        console.log("Open Mode: " + args[1]);
-        if (args[1] == 0x3) {
+        var openMode = args[1].toInt32();
+        console.log("Open Mode: " + openMode);
+        if (openMode == 0x3) {
             console.log("Pipe is Duplex");
-        } else if (args[1] == 0x1) {
+        } else if (openMode == 0x1) {
             console.log("Pipe is Read Only");
-        } else if (args[1] == 0x2) {
+        } else if (openMode == 0x2) {
             console.log("Pipe is Write Only");
         } else {
-            console.log("Double-check mode:\nhttps://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea");
+            console.log("Unknown Open Mode in CreateNamedPipe: " + openMode);
         }
         if ((args[2] & (1 << 2)) > 0) {
             console.log("Pipe is in MESSAGE mode");
@@ -227,11 +226,11 @@ Interceptor.attach(createNamedPipeA, {
         } else {
             console.log("Pipe accepts remote clients");
         }
-        pipename = args0Str;
+        this.pipename = pipename;
     },
     onLeave: function (retval) {
         //console.log("Handler: "+retval);
-        pipeHandlers[retval] = pipename;
+        pipeHandlers[retval] = this.pipename;
     }
 });
 
@@ -250,17 +249,18 @@ Interceptor.attach(createNamedPipeW, {
         );
         Returns file handler
         */
-        var args0Str = args[0].readUtf16String()
-        console.log("\nPipename: " + args0Str);
-        console.log("Mode: " + args[1]);
-        if (args[1] == 0x3) {
+        var pipename = args[0].readUtf16String();
+        console.log("\nPipename: " + pipename);
+        var openMode = args[1].toInt32();
+        console.log("Open Mode: " + openMode);
+        if (openMode == 0x3) {
             console.log("Pipe is Duplex");
-        } else if (args[1] == 0x1) {
+        } else if (openMode == 0x1) {
             console.log("Pipe is Read Only");
-        } else if (args[1] == 0x2) {
+        } else if (openMode == 0x2) {
             console.log("Pipe is Write Only");
         } else {
-            console.log("Double-check mode:\nhttps://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-createnamedpipew");
+            console.log("Unknown Open Mode in CreateNamedPipeW: " + openMode);
         }
         console.log("Pipe Mode: " + args[2]);
         if ((args[2] & (1 << 2)) > 0) {
@@ -278,11 +278,11 @@ Interceptor.attach(createNamedPipeW, {
         } else {
             console.log("Pipe accepts remote clients");
         }
-        pipename = args0Str;
+        this.pipename = args0Str;
     },
     onLeave: function (retval) {
         //console.log("\nHandler: "+retval);
-        pipeHandlers[retval] = pipename;
+        pipeHandlers[retval] = this.pipename;
     }
 });
 
@@ -320,4 +320,3 @@ Interceptor.attach(createPipe, {
         pipeHandlers[args[0]] = "Anonymous";
     }
 });
-
